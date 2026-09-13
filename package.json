@@ -1,0 +1,21 @@
+{
+  "name": "studyconnect-professional",
+  "version": "1.0.0",
+  "private": true,
+  "description": "StudyConnect - professional student productivity website",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "resend": "^6.27.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
