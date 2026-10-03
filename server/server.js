@@ -1,8 +1,11 @@
-// Fix: Node inherits a loopback DNS server (127.0.0.1) from the system config
-// (set by VPN/WSL2/Docker DNS stub). Override to public resolvers so that
-// mongoose's mongodb+srv SRV lookup succeeds — identical to what nslookup uses.
-const dns = require('dns');
-dns.setServers(['8.8.8.8', '4.2.2.2', '8.8.4.4']);
+// Fix: On some Windows dev machines Node inherits a loopback DNS (127.0.0.1)
+// from a VPN/WSL2/Docker stub, breaking mongodb+srv SRV lookups.
+// Apply the override ONLY in development — Vercel's Node runtime uses native
+// DNS correctly and overriding it there breaks Atlas SRV resolution.
+if (process.env.NODE_ENV !== 'production') {
+  const dns = require('dns');
+  dns.setServers(['8.8.8.8', '4.2.2.2', '8.8.4.4']);
+}
 
 require('dotenv').config();
 const express = require('express');
