@@ -20,14 +20,31 @@ let isConnected = false;
 
 async function connectDB() {
   if (isConnected) return;
-  if (!process.env.MONGODB_URI) {
-    throw new Error('MONGODB_URI environment variable is not set');
+  try {
+    if (!process.env.MONGODB_URI) {
+      throw new Error('MONGODB_URI environment variable is not set');
+    }
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000,
+    });
+    isConnected = true;
+    console.log('✅ MongoDB connected');
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') {
+      try {
+        console.log('⚠️ Remote MongoDB connection unavailable. Starting local embedded instance for preview...');
+        const { MongoMemoryServer } = require('mongodb-memory-server');
+        const mongod = await MongoMemoryServer.create();
+        await mongoose.connect(mongod.getUri());
+        isConnected = true;
+        console.log('✅ Local development database connected successfully');
+        return;
+      } catch (inner) {
+        console.error('Local fallback failed:', inner);
+      }
+    }
+    throw err;
   }
-  await mongoose.connect(process.env.MONGODB_URI, {
-    serverSelectionTimeoutMS: 10000,
-  });
-  isConnected = true;
-  console.log('✅ MongoDB connected');
 }
 
 // Connect on startup (non-serverless); also called per-request in connectDB()
@@ -65,9 +82,10 @@ app.use('/api/attendance',    require('./routes/attendance'));
 app.use('/api/tasks',         require('./routes/tasks'));
 app.use('/api/tests',         require('./routes/tests'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/fitness',       require('./routes/fitness'));
 
 // ── SPA catch-all ─────────────────────────────────────────────────────────────
-app.get('*', (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 

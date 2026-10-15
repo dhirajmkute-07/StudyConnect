@@ -26,6 +26,16 @@ const SC = {
     sessionCount: 0,
     selectedPreset: 25
   },
+  // Fitness module state
+  fitness: {
+    plan: [],
+    todayDate: null,
+    todayData: null,
+    stats: null,
+    history: [],
+    activePlannerDay: 'Monday',
+    activeDayExercises: []
+  },
   // Confirm callback
   _confirmCallback: null
 };
@@ -230,7 +240,8 @@ const PAGE_TITLES = {
   dashboard: 'Dashboard', profile: 'My Profile', subjects: 'Subjects',
   timetable: 'Timetable', attendance: 'Attendance', studyplan: 'Study Plan',
   tests: 'Tests & Exams', focuslearn: 'FocusLearn', notifications: 'Notifications',
-  timer: 'Study Timer', clock: 'Clock', settings: 'Settings'
+  timer: 'Study Timer', clock: 'Clock', settings: 'Settings',
+  fitness: 'Fitness Dashboard', 'fitness-planner': 'Weekly Workout Planner'
 };
 
 function navigate(page) {
@@ -258,6 +269,8 @@ function navigate(page) {
     studyplan: loadStudyPlan,
     tests: loadTests,
     notifications: loadNotifications,
+    fitness: loadFitnessDashboard,
+    'fitness-planner': loadFitnessPlanner,
     clock: startClock
   };
   if (loaders[page]) loaders[page]();
@@ -1622,6 +1635,1130 @@ function subjectColor(subjectName) {
   const s = SC.subjects.find(x => x.name.toLowerCase() === subjectName.toLowerCase());
   return s?.color || 'var(--accent)';
 }
+
+/* ============================================================
+   Fitness & Health Module Functions
+   ============================================================ */
+
+function getFitnessDateStr(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getFitnessDayName(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return days[dt.getDay()];
+}
+
+// ── Load Fitness Dashboard ────────────────────────────────────
+async function loadFitnessDashboard(dateStr) {
+  const activeDate = dateStr || SC.fitness.todayDate || getFitnessDateStr();
+  SC.fitness.todayDate = activeDate;
+
+  const dateInput = document.getElementById('fitness-active-date');
+  if (dateInput) dateInput.value = activeDate;
+
+  try {
+    const [stats, todayData, history] = await Promise.all([
+      api('GET', `/api/fitness/stats?date=${activeDate}`),
+      api('GET', `/api/fitness/today?date=${activeDate}`),
+      api('GET', '/api/fitness/history?limit=15')
+    ]);
+
+    SC.fitness.stats = stats;
+    SC.fitness.todayData = todayData;
+    SC.fitness.history = history;
+
+    // Initialize active exercises from session or template if not yet set
+    if (todayData.session && Array.isArray(todayData.session.exercises) && todayData.session.exercises.length > 0) {
+      SC.fitness.currentExercises = JSON.parse(JSON.stringify(todayData.session.exercises));
+    } else if (Array.isArray(todayData.templateExercises) && todayData.templateExercises.length > 0) {
+      SC.fitness.currentExercises = JSON.parse(JSON.stringify(todayData.templateExercises));
+    } else {
+      SC.fitness.currentExercises = [];
+    }
+
+    renderFitnessSummaryCards();
+    renderFitnessWeekStrip();
+    renderTodayWorkout();
+    renderFitnessDurationChart();
+    renderFitnessCalendar();
+    renderFitnessHistory();
+  } catch (err) {
+    console.error('Fitness dashboard load error:', err);
+    toast('Could not load fitness data. Please try again.', 'error');
+  }
+}
+
+function onFitnessDateChange(dateStr) {
+  if (!dateStr) return;
+  loadFitnessDashboard(dateStr);
+}
+
+// ── Render Fitness Summary Cards (Req 7) ──────────────────────
+function renderFitnessSummaryCards() {
+  const container = document.getElementById('fitness-stats-grid');
+  if (!container) return;
+
+  const stats = SC.fitness.stats || {
+    todayStatus: 'no_workout',
+    currentStreak: 0,
+    longestStreak: 0,
+    totalWorkouts: 0,
+    totalDurationMinutes: 0,
+    thisWeekCompleted: 0,
+    thisWeekScheduled: 0,
+    monthlyConsistency: 0
+  };
+
+  // Status mapping
+  const statusLabels = {
+    completed: 'Completed ✓',
+    in_progress: 'In Progress ⏳',
+    rest_day: 'Rest Day 🧘‍♂️',
+    scheduled: 'Scheduled 🎯',
+    no_workout: 'No Workout Set'
+  };
+  const statusClasses = {
+    completed: 'status-completed',
+    in_progress: 'status-in-progress',
+    rest_day: 'status-rest',
+    scheduled: 'status-scheduled',
+    no_workout: 'status-scheduled'
+  };
+
+  const todayLabel = statusLabels[stats.todayStatus] || 'Pending';
+  const badgeClass = statusClasses[stats.todayStatus] || 'status-scheduled';
+  const totalHours = stats.totalDurationMinutes ? (stats.totalDurationMinutes / 60).toFixed(1) : '0';
+  const weekScheduled = stats.thisWeekScheduled || 0;
+  const weekPct = weekScheduled > 0 ? Math.round((stats.thisWeekCompleted / weekScheduled) * 100) : 0;
+
+  const todaySub = stats.todayStatus === 'no_workout'
+    ? 'No workout set'
+    : (stats.todayStatus === 'rest_day' ? 'Scheduled recovery' : (stats.todayWorkoutName || 'Scheduled'));
+
+  const streakSub = stats.currentStreak > 0
+    ? 'Active momentum! Rest days bridge'
+    : 'Complete a workout to start streak';
+
+  const weekSub = weekScheduled > 0
+    ? `${weekPct}% weekly target reached`
+    : 'No workouts scheduled this week';
+
+  const monthSub = stats.monthlyConsistency > 0
+    ? 'Scheduled workout adherence'
+    : 'No scheduled workouts completed';
+
+  container.innerHTML = `
+    <!-- Card 1: Today's Workout -->
+    <div class="fitness-stat-card">
+      <div class="fitness-stat-top">
+        <span class="fitness-stat-title">Today's Workout</span>
+        <span class="fitness-stat-icon" style="background:#e0e7ff;color:#4f46e5;">⚡</span>
+      </div>
+      <div class="fitness-stat-val val-badge ${badgeClass}">${todayLabel}</div>
+      <div class="fitness-stat-sub">${todaySub}</div>
+    </div>
+
+    <!-- Card 2: Current Streak -->
+    <div class="fitness-stat-card">
+      <div class="fitness-stat-top">
+        <span class="fitness-stat-title">Current Streak</span>
+        <span class="fitness-stat-icon" style="background:#fef3c7;color:#d97706;">🔥</span>
+      </div>
+      <div class="fitness-stat-val" style="color:#d97706;">
+        ${stats.currentStreak} <span class="stat-unit">days</span>
+      </div>
+      <div class="fitness-stat-sub">${streakSub}</div>
+    </div>
+
+    <!-- Card 3: Longest Streak -->
+    <div class="fitness-stat-card">
+      <div class="fitness-stat-top">
+        <span class="fitness-stat-title">Longest Streak</span>
+        <span class="fitness-stat-icon" style="background:#fce7f3;color:#db2777;">🏆</span>
+      </div>
+      <div class="fitness-stat-val">
+        ${stats.longestStreak} <span class="stat-unit">days</span>
+      </div>
+      <div class="fitness-stat-sub">${stats.longestStreak > 0 ? 'All-time personal record' : 'Start your first streak!'}</div>
+    </div>
+
+    <!-- Card 4: Total Completed Workouts -->
+    <div class="fitness-stat-card">
+      <div class="fitness-stat-top">
+        <span class="fitness-stat-title">Total Completed</span>
+        <span class="fitness-stat-icon" style="background:#dcfce7;color:#16a34a;">🏋️</span>
+      </div>
+      <div class="fitness-stat-val">
+        ${stats.totalWorkouts} <span class="stat-unit">sessions</span>
+      </div>
+      <div class="fitness-stat-sub">${totalHours} hrs total logged</div>
+    </div>
+
+    <!-- Card 5: This Week's Progress -->
+    <div class="fitness-stat-card">
+      <div class="fitness-stat-top">
+        <span class="fitness-stat-title">This Week's Progress</span>
+        <span class="fitness-stat-icon" style="background:#e0f2fe;color:#0284c7;">📅</span>
+      </div>
+      <div class="fitness-stat-val">
+        ${stats.thisWeekCompleted} / ${weekScheduled} <span class="stat-unit">done</span>
+      </div>
+      <div class="fitness-stat-sub">${weekSub}</div>
+    </div>
+
+    <!-- Card 6: Monthly Consistency -->
+    <div class="fitness-stat-card">
+      <div class="fitness-stat-top">
+        <span class="fitness-stat-title">Monthly Consistency</span>
+        <span class="fitness-stat-icon" style="background:#f3e8ff;color:#7e22ce;">📈</span>
+      </div>
+      <div class="fitness-stat-val">
+        ${stats.monthlyConsistency}%
+      </div>
+      <div class="fitness-stat-sub">${monthSub}</div>
+    </div>
+  `;
+
+  // Update streak badge in week header
+  const streakBadge = document.getElementById('fitness-streak-badge');
+  if (streakBadge) {
+    streakBadge.textContent = `🔥 ${stats.currentStreak}-Day Streak`;
+  }
+}
+
+// ── Render 7-Day Week Strip (Image 1 reference) ───────────────
+function renderFitnessWeekStrip() {
+  const container = document.getElementById('fitness-week-strip');
+  if (!container) return;
+
+  const weeklyDays = (SC.fitness.stats && SC.fitness.stats.weeklyDays) || [];
+  const activeDate = SC.fitness.todayDate || getFitnessDateStr();
+
+  const dayAbbrs = {
+    Monday: 'Mon', Tuesday: 'Tue', Wednesday: 'Wed', Thursday: 'Thu',
+    Friday: 'Fri', Saturday: 'Sat', Sunday: 'Sun'
+  };
+
+  container.innerHTML = weeklyDays.map(dayItem => {
+    const isSelected = dayItem.date === activeDate;
+    const abbr = dayAbbrs[dayItem.day] || dayItem.day.slice(0, 3);
+
+    let iconHtml = '—';
+    let iconClass = 'unscheduled';
+
+    if (dayItem.status === 'completed') {
+      iconHtml = '✓';
+      iconClass = 'completed';
+    } else if (dayItem.status === 'rest_day') {
+      iconHtml = '❄️';
+      iconClass = 'rest';
+    } else if (dayItem.status === 'missed') {
+      iconHtml = '✕';
+      iconClass = 'missed';
+    } else if (dayItem.status === 'in_progress' || dayItem.status === 'today_pending') {
+      iconHtml = '⏳';
+      iconClass = 'pending';
+    }
+
+    const shortTarget = dayItem.status === 'rest_day'
+      ? 'Rest Day'
+      : (dayItem.workoutName ? dayItem.workoutName : (dayItem.status === 'unscheduled' ? 'Rest / Off' : 'Scheduled'));
+
+    return `
+      <div class="week-strip-day ${isSelected ? 'active-day' : ''}" onclick="onFitnessDateChange('${dayItem.date}')" title="${dayItem.day} (${dayItem.date}): ${dayItem.workoutName || dayItem.status}">
+        <div class="day-label">${abbr}</div>
+        <div class="day-icon ${iconClass}">${iconHtml}</div>
+        <div class="day-target" title="${shortTarget}">${shortTarget}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Render Today's Workout Tracker (Req 2, 3) ─────────────────
+function renderTodayWorkout() {
+  const container = document.getElementById('today-workout-container');
+  if (!container) return;
+
+  const todayData = SC.fitness.todayData || {};
+  const dateStr = todayData.date || getFitnessDateStr();
+  const dayName = todayData.day || getFitnessDayName(dateStr);
+  const plan = todayData.plan || {};
+  const session = todayData.session || null;
+
+  const isRestDay = (session && session.isRestDay) || (!session && plan && plan.isRestDay);
+  const isCompleted = session && session.status === 'completed';
+  const workoutName = (session && session.workoutName) || (plan && plan.workoutName) || (isRestDay ? 'Rest Day' : 'Workout');
+  const exercises = SC.fitness.currentExercises || [];
+
+  // 1. Rest Day View
+  if (isRestDay) {
+    container.innerHTML = `
+      <div class="workout-header-card">
+        <div class="workout-title-group">
+          <div class="eyebrow" style="color:var(--accent);font-weight:700;font-size:0.75rem;">${dayName.toUpperCase()} • ${dateStr}</div>
+          <h3>${workoutName}</h3>
+          <p>Scheduled rest & recovery period</p>
+          <div class="workout-meta-pills">
+            <span class="workout-pill pill-rest">🧘‍♂️ Rest Day</span>
+            <span class="workout-pill">Protects Daily Streak</span>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick="toggleTodayRestDay(false)">Switch to Training Day</button>
+      </div>
+      <div class="workout-body">
+        <div class="rest-day-box">
+          <div class="rest-day-icon">🧊</div>
+          <h4>Recovery Day Active</h4>
+          <p>Rest days allow muscle tissue repair, nervous system recovery, and mental rejuvenation. They bridge your workout streak without counting as a missed session.</p>
+          <div style="margin-top:18px;">
+            <button class="btn btn-primary btn-sm" onclick="toggleTodayRestDay(false)">Log Workout Instead</button>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  // 2. No workout scheduled view
+  if ((!exercises || exercises.length === 0) && !session) {
+    container.innerHTML = `
+      <div class="workout-header-card">
+        <div class="workout-title-group">
+          <div class="eyebrow" style="color:var(--text-muted);font-weight:700;font-size:0.75rem;">${dayName.toUpperCase()} • ${dateStr}</div>
+          <h3>No Workout Scheduled</h3>
+          <p>No training routine has been configured for ${dayName}.</p>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="navigate('fitness-planner')">Configure Plan</button>
+      </div>
+      <div class="workout-body">
+        <div class="empty-state" style="padding:32px 16px;text-align:center;">
+          <div style="font-size:2.5rem;margin-bottom:12px;">📋</div>
+          <h4 style="font-size:1.1rem;font-weight:700;margin-bottom:6px;">Plan this day in the Workout Planner</h4>
+          <p style="color:var(--text-secondary);font-size:0.875rem;max-width:400px;margin:0 auto 16px;">Add exercises, target sets, reps and weights for ${dayName} to track them automatically here.</p>
+          <div style="display:flex;gap:10px;justify-content:center;">
+            <button class="btn btn-primary btn-sm" onclick="navigate('fitness-planner')">Open Weekly Planner</button>
+            <button class="btn btn-secondary btn-sm" onclick="toggleTodayRestDay(true)">Mark as Rest Day</button>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  // 3. Active Workout Tracker View
+  const totalSets = exercises.reduce((sum, ex) => sum + (ex.setsData ? ex.setsData.length : (ex.plannedSets || 0)), 0);
+  const doneSets = exercises.reduce((sum, ex) => {
+    if (!ex.setsData) return sum;
+    return sum + ex.setsData.filter(s => s.completed).length;
+  }, 0);
+
+  const completionPct = totalSets > 0 ? Math.round((doneSets / totalSets) * 100) : 0;
+  const currentDuration = session && session.durationMinutes !== undefined ? session.durationMinutes : 0;
+
+  let exerciseCardsHtml = exercises.map((ex, exIdx) => {
+    const sets = ex.setsData || [];
+    const allSetsDone = sets.length > 0 && sets.every(s => s.completed);
+
+    const rowsHtml = sets.map((s, setIdx) => {
+      return `
+        <tr>
+          <td><span class="set-num-badge">${s.setNumber || setIdx + 1}</span></td>
+          <td style="color:var(--text-secondary);font-size:0.85rem;">${ex.plannedReps || '10'} reps ${ex.plannedWeight ? `@ ${ex.plannedWeight}` : ''}</td>
+          <td>
+            <input type="text" class="set-input" value="${s.weight || ''}" placeholder="${ex.plannedWeight || 'kg/lbs'}"
+              onchange="onSetInputChange(${exIdx}, ${setIdx}, 'weight', this.value)" ${isCompleted ? 'readonly' : ''} />
+          </td>
+          <td>
+            <input type="text" class="set-input" value="${s.reps || ''}" placeholder="${ex.plannedReps || '10'}"
+              onchange="onSetInputChange(${exIdx}, ${setIdx}, 'reps', this.value)" ${isCompleted ? 'readonly' : ''} />
+          </td>
+          <td style="text-align:center;">
+            <input type="checkbox" class="set-checkbox" ${s.completed ? 'checked' : ''}
+              onchange="onSetCheck(${exIdx}, ${setIdx}, this.checked)" ${isCompleted ? 'disabled' : ''} />
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    return `
+      <div class="exercise-track-card ${allSetsDone ? 'all-done' : ''}">
+        <div class="exercise-track-head">
+          <div>
+            <div class="exercise-name-title">
+              <span>${allSetsDone ? '✅' : '🏋️'}</span>
+              <span>${ex.name}</span>
+            </div>
+            <div class="exercise-target-badge">
+              Target: ${ex.plannedSets || sets.length} sets × ${ex.plannedReps || '10'} reps ${ex.plannedWeight ? `(${ex.plannedWeight})` : ''}
+              ${ex.restDuration ? `• ⏱ Rest ${ex.restDuration}` : ''}
+            </div>
+          </div>
+          <span class="badge ${allSetsDone ? 'badge-success' : 'badge-secondary'}" style="font-size:0.75rem;">
+            ${sets.filter(s => s.completed).length} / ${sets.length} Sets
+          </span>
+        </div>
+        ${ex.notes ? `<div style="padding:6px 16px;background:rgba(0,0,0,0.02);font-size:0.75rem;color:var(--text-muted);border-bottom:1px solid var(--border);">📝 ${ex.notes}</div>` : ''}
+        <div class="sets-grid-table-wrap">
+          <table class="sets-grid-table">
+            <thead>
+              <tr>
+                <th style="width:40px;">Set</th>
+                <th>Target</th>
+                <th>Weight</th>
+                <th>Reps</th>
+                <th style="width:50px;text-align:center;">Done</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="workout-header-card">
+      <div class="workout-title-group">
+        <div class="eyebrow" style="color:var(--accent);font-weight:700;font-size:0.75rem;">${dayName.toUpperCase()} • ${dateStr}</div>
+        <h3>${workoutName}</h3>
+        <p>${exercises.length} exercises scheduled</p>
+        <div class="workout-meta-pills">
+          <span class="workout-pill ${isCompleted ? 'pill-success' : 'pill-active'}">
+            ${isCompleted ? '✓ Completed' : `${doneSets}/${totalSets} Sets (${completionPct}%)`}
+          </span>
+          ${currentDuration > 0 ? `<span class="workout-pill">⏱ ${currentDuration} min</span>` : ''}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        ${!isCompleted ? `<button class="btn btn-sm btn-ghost" onclick="toggleTodayRestDay(true)">Mark Rest Day</button>` : ''}
+        <button class="btn btn-sm btn-secondary" onclick="navigate('fitness-planner')">Edit Plan</button>
+      </div>
+    </div>
+
+    <div class="workout-body">
+      ${isCompleted ? `
+        <div style="padding:14px 18px;background:#dcfce7;border:1px solid #86efac;color:#15803d;border-radius:var(--radius-sm);margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+          <div>
+            <strong>🎉 Workout Completed!</strong>
+            <div style="font-size:0.85rem;margin-top:2px;">Logged ${currentDuration} minutes of focused training. Your daily streak is safe!</div>
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="reopenWorkoutSession()">Edit / Reopen</button>
+        </div>
+      ` : ''}
+
+      ${exerciseCardsHtml}
+    </div>
+
+    ${!isCompleted ? `
+      <div class="workout-action-bar">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">Duration (min):</span>
+          <input type="number" id="workout-elapsed-minutes" class="set-input" min="1" max="360" value="${currentDuration || ''}" placeholder="30" style="width:75px;" />
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-secondary" onclick="saveWorkoutProgress()">Save Progress</button>
+          <button class="btn btn-primary" onclick="openCompleteWorkoutModal()">Complete Workout 🎉</button>
+        </div>
+      </div>
+    ` : ''}
+  `;
+}
+
+// ── Interactive Set and Exercise Handlers ──────────────────────
+function onSetCheck(exIdx, setIdx, isChecked) {
+  const exercises = SC.fitness.currentExercises;
+  if (!exercises[exIdx] || !exercises[exIdx].setsData[setIdx]) return;
+
+  exercises[exIdx].setsData[setIdx].completed = isChecked;
+
+  // Check if all sets for this exercise are done
+  const allSets = exercises[exIdx].setsData;
+  exercises[exIdx].completed = allSets.every(s => s.completed);
+
+  // Update card header badge dynamically
+  renderTodayWorkout();
+}
+
+function onSetInputChange(exIdx, setIdx, field, value) {
+  const exercises = SC.fitness.currentExercises;
+  if (!exercises[exIdx] || !exercises[exIdx].setsData[setIdx]) return;
+  exercises[exIdx].setsData[setIdx][field] = String(value).trim();
+}
+
+// ── Save Partial Progress ─────────────────────────────────────
+async function saveWorkoutProgress() {
+  const todayData = SC.fitness.todayData || {};
+  const dateStr = todayData.date || getFitnessDateStr();
+  const workoutName = (todayData.session && todayData.session.workoutName) || (todayData.plan && todayData.plan.workoutName) || 'Workout';
+  const durationInput = document.getElementById('workout-elapsed-minutes');
+  const durationMinutes = durationInput && durationInput.value ? parseInt(durationInput.value, 10) : 0;
+
+  try {
+    const payload = {
+      date: dateStr,
+      workoutName,
+      isRestDay: false,
+      status: 'in_progress',
+      durationMinutes,
+      exercises: SC.fitness.currentExercises || []
+    };
+
+    const saved = await api('POST', '/api/fitness/session', payload);
+    SC.fitness.todayData.session = saved;
+    toast('Workout progress saved!', 'success');
+
+    // Refresh stats in background
+    const stats = await api('GET', `/api/fitness/stats?date=${dateStr}`);
+    SC.fitness.stats = stats;
+    renderFitnessSummaryCards();
+    renderFitnessWeekStrip();
+  } catch (err) {
+    console.error('Save progress error:', err);
+    toast('Failed to save workout progress.', 'error');
+  }
+}
+
+// ── Complete Workout Confirmation Modal ───────────────────────
+function openCompleteWorkoutModal() {
+  const durationInput = document.getElementById('workout-elapsed-minutes');
+  const session = SC.fitness.todayData && SC.fitness.todayData.session;
+  const durVal = durationInput && durationInput.value
+    ? parseInt(durationInput.value, 10)
+    : (session && session.durationMinutes ? session.durationMinutes : '');
+
+  const modalDurInput = document.getElementById('complete-duration');
+  if (modalDurInput) modalDurInput.value = durVal;
+
+  openModal('workout-complete-modal');
+}
+
+async function confirmCompleteWorkout() {
+  const todayData = SC.fitness.todayData || {};
+  const dateStr = todayData.date || getFitnessDateStr();
+  const workoutName = (todayData.session && todayData.session.workoutName) || (todayData.plan && todayData.plan.workoutName) || 'Workout';
+
+  const modalDurInput = document.getElementById('complete-duration');
+  const durationInput = document.getElementById('workout-elapsed-minutes');
+  const durationMinutes = modalDurInput && modalDurInput.value
+    ? parseInt(modalDurInput.value, 10)
+    : (durationInput && durationInput.value ? parseInt(durationInput.value, 10) : 0);
+  const notesInput = document.getElementById('complete-notes');
+  const notes = notesInput ? notesInput.value.trim() : '';
+
+  try {
+    // Ensure all sets marked complete or retain logged state
+    const exercises = (SC.fitness.currentExercises || []).map(ex => ({
+      ...ex,
+      completed: true,
+      setsData: (ex.setsData || []).map(s => ({ ...s, completed: true }))
+    }));
+
+    const payload = {
+      date: dateStr,
+      workoutName,
+      isRestDay: false,
+      status: 'completed',
+      durationMinutes,
+      notes,
+      exercises
+    };
+
+    const saved = await api('POST', '/api/fitness/session', payload);
+    SC.fitness.todayData.session = saved;
+
+    closeModal('workout-complete-modal');
+    toast('🎉 Congratulations! Workout completed & streak updated!', 'success');
+
+    // Full refresh of dashboard
+    await loadFitnessDashboard(dateStr);
+  } catch (err) {
+    console.error('Complete workout error:', err);
+    toast('Could not complete workout session.', 'error');
+  }
+}
+
+async function reopenWorkoutSession() {
+  const todayData = SC.fitness.todayData;
+  if (!todayData || !todayData.session) return;
+
+  try {
+    const updated = await api('PUT', `/api/fitness/session/${todayData.session.id}`, {
+      status: 'in_progress'
+    });
+    SC.fitness.todayData.session = updated;
+    toast('Session reopened for editing.', 'info');
+    renderTodayWorkout();
+    const stats = await api('GET', `/api/fitness/stats?date=${todayData.date}`);
+    SC.fitness.stats = stats;
+    renderFitnessSummaryCards();
+    renderFitnessWeekStrip();
+  } catch (err) {
+    toast('Failed to reopen session.', 'error');
+  }
+}
+
+async function toggleTodayRestDay(isRest) {
+  const todayData = SC.fitness.todayData || {};
+  const dateStr = todayData.date || getFitnessDateStr();
+
+  try {
+    const payload = {
+      date: dateStr,
+      workoutName: isRest ? 'Rest Day' : ((todayData.plan && todayData.plan.workoutName) || 'Workout'),
+      isRestDay: isRest,
+      status: isRest ? 'rest_day' : 'in_progress',
+      durationMinutes: 0,
+      exercises: isRest ? [] : (todayData.templateExercises || [])
+    };
+
+    const saved = await api('POST', '/api/fitness/session', payload);
+    SC.fitness.todayData.session = saved;
+    toast(isRest ? 'Marked as Rest Day 🧘‍♂️ Streak protected!' : 'Rest Day removed.', 'info');
+    await loadFitnessDashboard(dateStr);
+  } catch (err) {
+    toast('Failed to update rest day.', 'error');
+  }
+}
+
+// ── Render SVG Duration Chart (Req 6) ─────────────────────────
+function renderFitnessDurationChart() {
+  const container = document.getElementById('fitness-duration-chart');
+  if (!container) return;
+
+  const durationData = (SC.fitness.stats && SC.fitness.stats.durationByDay) || [];
+  const hasActivity = durationData.some(d => d.duration > 0);
+  if (durationData.length === 0 || !hasActivity) {
+    container.innerHTML = `
+      <div class="empty-state" style="padding:28px 16px;text-align:center;">
+        <p style="color:var(--text-muted);font-size:0.875rem;margin:0;">No workout activity recorded in the past 14 days.<br><small style="color:var(--text-secondary);">Logged workout durations will appear here automatically.</small></p>
+      </div>`;
+    return;
+  }
+
+  const maxVal = Math.max(30, ...durationData.map(d => d.duration));
+  const barWidth = 24;
+  const chartHeight = 130;
+  const chartTop = 25;
+  const totalWidth = durationData.length * 44;
+
+  const barsSvg = durationData.map((d, i) => {
+    const h = d.duration > 0 ? Math.max(6, (d.duration / maxVal) * chartHeight) : 2;
+    const x = i * 44 + 10;
+    const y = chartTop + chartHeight - h;
+
+    return `
+      <g>
+        <rect class="chart-bar" x="${x}" y="${y}" width="${barWidth}" height="${h}"
+          style="fill:${d.duration > 0 ? 'var(--accent)' : 'var(--border)'};">
+          <title>${d.day} (${d.date}): ${d.duration} min</title>
+        </rect>
+        ${d.duration > 0 ? `<text class="chart-val" x="${x + barWidth / 2}" y="${y - 6}">${d.duration}m</text>` : ''}
+        <text class="chart-label" x="${x + barWidth / 2}" y="${chartTop + chartHeight + 16}">${d.day}</text>
+      </g>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <div style="overflow-x:auto;padding-bottom:8px;">
+      <svg class="chart-svg" viewBox="0 0 ${totalWidth + 20} 180" style="min-width:${totalWidth}px;">
+        <line x1="0" y1="${chartTop + chartHeight}" x2="${totalWidth + 20}" y2="${chartTop + chartHeight}" stroke="var(--border)" stroke-width="1.5" />
+        ${barsSvg}
+      </svg>
+    </div>
+  `;
+}
+
+// ── Render GitHub-Style Heatmap Calendar (Req 6) ──────────────
+function renderFitnessCalendar() {
+  const container = document.getElementById('fitness-calendar-grid');
+  if (!container) return;
+
+  const calendarDays = (SC.fitness.stats && SC.fitness.stats.calendarDays) || [];
+  if (calendarDays.length === 0) {
+    container.innerHTML = `<div class="empty" style="padding:20px;text-align:center;">No calendar activity recorded.</div>`;
+    return;
+  }
+
+  const activeDate = SC.fitness.todayDate || getFitnessDateStr();
+
+  const cellsHtml = calendarDays.map(dayItem => {
+    const isToday = dayItem.date === activeDate;
+    let titleStr = `${dayItem.day}, ${dayItem.date}: `;
+
+    if (dayItem.status === 'completed') {
+      titleStr += `Completed (${dayItem.duration}m - ${dayItem.workoutName || 'Workout'})`;
+    } else if (dayItem.status === 'rest_day') {
+      titleStr += `Rest Day (Preserves Streak)`;
+    } else if (dayItem.status === 'missed') {
+      titleStr += `Missed scheduled workout`;
+    } else {
+      titleStr += `Unscheduled / Off`;
+    }
+
+    return `
+      <div class="heatmap-cell ${dayItem.status} ${isToday ? 'today-cell' : ''}"
+        onclick="onFitnessDateChange('${dayItem.date}')" title="${titleStr}">
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="heatmap-matrix-wrap">
+      <div class="heatmap-weekday-labels">
+        <span>Mon</span>
+        <span>Wed</span>
+        <span>Fri</span>
+        <span>Sun</span>
+      </div>
+      <div class="heatmap-matrix">
+        ${cellsHtml}
+      </div>
+    </div>
+  `;
+}
+
+// ── Render Workout History (Req 4) ────────────────────────────
+function renderFitnessHistory() {
+  const container = document.getElementById('fitness-history-list');
+  if (!container) return;
+
+  const history = SC.fitness.history || [];
+  if (history.length === 0) {
+    container.innerHTML = `
+      <div class="empty" style="padding:24px;text-align:center;">
+        <div style="font-size:2rem;margin-bottom:8px;">🏋️‍♂️</div>
+        <strong>No past workouts recorded yet.</strong>
+        <p style="color:var(--text-muted);font-size:0.8rem;margin:4px 0 0;">Complete your first session today to build your history!</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = history.map(item => {
+    const isRest = item.isRestDay;
+    const icon = isRest ? '❄️' : '✓';
+    const iconClass = isRest ? 'rest' : 'done';
+    const subtitle = isRest ? 'Rest Day' : `${item.durationMinutes || 0} min • ${(item.exercises || []).length} exercises`;
+
+    return `
+      <div class="history-row">
+        <div class="history-row-left">
+          <div class="history-status-icon ${iconClass}">${icon}</div>
+          <div>
+            <strong style="font-size:0.9rem;">${item.workoutName || (isRest ? 'Rest Day' : 'Workout')}</strong>
+            <div style="font-size:0.75rem;color:var(--text-muted);">${item.day}, ${item.date} • ${subtitle}</div>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick="openSessionDetails('${item.id}')">View</button>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Workout History Details & Edit Modal (Req 4) ──────────────
+async function openSessionDetails(sessionId) {
+  const item = (SC.fitness.history || []).find(h => h.id === sessionId);
+  if (!item) return;
+
+  const modalBody = document.getElementById('session-modal-body');
+  if (!modalBody) return;
+
+  document.getElementById('session-modal-title').textContent = `${item.workoutName || 'Workout'} (${item.date})`;
+
+  const exercisesHtml = (item.exercises || []).map((ex, i) => {
+    const sets = ex.setsData || [];
+    return `
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;">
+        <strong style="font-size:0.9rem;">${i + 1}. ${ex.name}</strong>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin:2px 0 8px;">Target: ${ex.plannedSets} sets × ${ex.plannedReps} ${ex.plannedWeight ? `(${ex.plannedWeight})` : ''}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${sets.map(s => `
+            <span style="font-size:0.75rem;padding:3px 8px;border-radius:12px;background:var(--bg-card);border:1px solid var(--border);">
+              Set ${s.setNumber}: ${s.weight || 'BW'} × ${s.reps || '0'} reps
+            </span>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  modalBody.innerHTML = `
+    <div class="form-group">
+      <label>Workout Name</label>
+      <input type="text" id="detail-workout-name" class="form-control" value="${item.workoutName || ''}" />
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-group">
+        <label>Date (Read-only)</label>
+        <input type="text" class="form-control" value="${item.date} (${item.day})" readonly style="opacity:0.7;" />
+      </div>
+      <div class="form-group">
+        <label>Duration (Minutes)</label>
+        <input type="number" id="detail-duration" class="form-control" value="${item.durationMinutes || 0}" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Session Notes</label>
+      <textarea id="detail-notes" class="form-control" rows="2">${item.notes || ''}</textarea>
+    </div>
+    <div style="margin-top:16px;">
+      <label style="font-size:0.85rem;font-weight:700;display:block;margin-bottom:8px;">Logged Exercises (${(item.exercises || []).length})</label>
+      ${exercisesHtml || '<p class="text-muted text-sm">No specific exercise set logs recorded.</p>'}
+    </div>
+  `;
+
+  // Bind Save and Delete
+  const saveBtn = document.getElementById('session-modal-save-btn');
+  const deleteBtn = document.getElementById('session-modal-delete-btn');
+
+  saveBtn.onclick = () => saveSessionDetails(sessionId);
+  deleteBtn.onclick = () => deleteWorkoutSession(sessionId);
+
+  openModal('session-details-modal');
+}
+
+async function saveSessionDetails(sessionId) {
+  const name = document.getElementById('detail-workout-name')?.value;
+  const duration = parseInt(document.getElementById('detail-duration')?.value, 10) || 0;
+  const notes = document.getElementById('detail-notes')?.value;
+
+  try {
+    await api('PUT', `/api/fitness/session/${sessionId}`, {
+      workoutName: name,
+      durationMinutes: duration,
+      notes
+    });
+    toast('Session log updated.', 'success');
+    closeModal('session-details-modal');
+    loadFitnessDashboard();
+  } catch (err) {
+    toast('Failed to update session log.', 'error');
+  }
+}
+
+function deleteWorkoutSession(sessionId) {
+  confirmDialog('Delete Session', 'Are you sure you want to delete this workout log? Past streak records might be affected.', async () => {
+    try {
+      await api('DELETE', `/api/fitness/session/${sessionId}`);
+      toast('Workout session removed.', 'info');
+      closeModal('session-details-modal');
+      loadFitnessDashboard();
+    } catch (err) {
+      toast('Failed to delete workout session.', 'error');
+    }
+  }, 'Delete');
+}
+
+// ============================================================
+// Weekly Workout Planner (Req 2)
+// ============================================================
+
+const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+async function loadFitnessPlanner(day) {
+  const activeDay = day || SC.fitness.activePlannerDay || 'Monday';
+  SC.fitness.activePlannerDay = activeDay;
+
+  try {
+    const plans = await api('GET', '/api/fitness/plan');
+    SC.fitness.plan = plans;
+
+    const currentPlan = plans.find(p => p.day === activeDay) || {
+      day: activeDay,
+      workoutName: '',
+      isRestDay: false,
+      notes: '',
+      exercises: []
+    };
+
+    SC.fitness.activeDayExercises = JSON.parse(JSON.stringify(currentPlan.exercises || []));
+
+    renderPlannerTabs();
+    renderPlannerDayView(currentPlan);
+  } catch (err) {
+    console.error('Planner load error:', err);
+    toast('Failed to load workout planner.', 'error');
+  }
+}
+
+function selectPlannerDay(day) {
+  SC.fitness.activePlannerDay = day;
+  loadFitnessPlanner(day);
+}
+
+function renderPlannerTabs() {
+  const tabsContainer = document.getElementById('fitness-planner-day-tabs');
+  if (!tabsContainer) return;
+
+  const plans = SC.fitness.plan || [];
+  const planMap = {};
+  plans.forEach(p => { planMap[p.day] = p; });
+
+  tabsContainer.innerHTML = WEEK_DAYS.map(d => {
+    const isSelected = d === SC.fitness.activePlannerDay;
+    const p = planMap[d];
+    const isRest = p && p.isRestDay;
+    const exCount = p && p.exercises ? p.exercises.length : 0;
+    const label = isRest ? 'Rest' : (exCount > 0 ? `${exCount} ex` : 'Off');
+
+    return `
+      <button class="day-tab ${isSelected ? 'active' : ''}" onclick="selectPlannerDay('${d}')">
+        <div>${d.slice(0, 3)}</div>
+        <div style="font-size:0.7rem;opacity:0.8;font-weight:500;">${label}</div>
+      </button>
+    `;
+  }).join('');
+}
+
+function renderPlannerDayView(currentPlan) {
+  const titleEl = document.getElementById('planner-active-day-title');
+  const toggleEl = document.getElementById('planner-rest-day-toggle');
+  const addBtn = document.getElementById('btn-add-exercise');
+  const bodyEl = document.getElementById('planner-active-day-body');
+
+  if (titleEl) titleEl.textContent = `${currentPlan.day} Workout Routine`;
+  if (toggleEl) toggleEl.checked = Boolean(currentPlan.isRestDay);
+  if (addBtn) addBtn.style.display = currentPlan.isRestDay ? 'none' : 'inline-flex';
+
+  if (!bodyEl) return;
+
+  // If Rest Day
+  if (currentPlan.isRestDay) {
+    bodyEl.innerHTML = `
+      <div class="rest-day-box" style="margin:8px 0;">
+        <div class="rest-day-icon">🧊</div>
+        <h4>${currentPlan.day} is Configured as a Rest Day</h4>
+        <p>No workout is scheduled on this day. When a rest day arrives, it will preserve and bridge your streak without penalizing you as missed.</p>
+        <div style="margin-top:16px;">
+          <button class="btn btn-secondary btn-sm" onclick="togglePlannerRestDay(false)">Enable Workout on ${currentPlan.day}</button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  // Active workout editor
+  const exercises = SC.fitness.activeDayExercises || [];
+
+  const exercisesListHtml = exercises.length > 0
+    ? exercises.map((ex, index) => {
+        return `
+          <div class="planner-exercise-item">
+            <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;">
+              <span class="planner-order-badge">${index + 1}</span>
+              <div class="reorder-btns">
+                <button class="btn-arrow" onclick="reorderExercise(${index}, -1)" ${index === 0 ? 'disabled style="opacity:0.3;"' : ''} title="Move up">▲</button>
+                <button class="btn-arrow" onclick="reorderExercise(${index}, 1)" ${index === exercises.length - 1 ? 'disabled style="opacity:0.3;"' : ''} title="Move down">▼</button>
+              </div>
+              <div style="flex:1;min-width:0;">
+                <strong style="font-size:0.95rem;">${ex.name}</strong>
+                <div class="planner-ex-meta">
+                  <span>${ex.sets} sets × ${ex.reps} reps</span>
+                  ${ex.weight ? `<span>Weight: ${ex.weight}</span>` : ''}
+                  ${ex.restDuration ? `<span>Rest: ${ex.restDuration}</span>` : ''}
+                </div>
+                ${ex.notes ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px;">📝 ${ex.notes}</div>` : ''}
+              </div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0;">
+              <button class="btn btn-sm btn-ghost" onclick="openExerciseModal(${index})">Edit</button>
+              <button class="btn btn-sm btn-ghost" style="color:var(--red);" onclick="deleteExerciseFromPlan(${index})">✕</button>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : `
+      <div class="empty-state" style="padding:28px 16px;text-align:center;border:1.5px dashed var(--border);border-radius:var(--radius);">
+        <div style="font-size:2rem;margin-bottom:8px;">🏋️</div>
+        <h4>No exercises added for ${currentPlan.day} yet</h4>
+        <p style="color:var(--text-secondary);font-size:0.85rem;max-width:380px;margin:0 auto 14px;">Add your target exercises, sets, reps and rest periods for this day.</p>
+        <button class="btn btn-primary btn-sm" onclick="openExerciseModal()">+ Add First Exercise</button>
+      </div>
+    `;
+
+  bodyEl.innerHTML = `
+    <div class="planner-form-grid">
+      <div class="form-group" style="margin-bottom:0;">
+        <label>Workout Name *</label>
+        <input type="text" id="planner-workout-name" class="form-control" value="${currentPlan.workoutName || ''}" placeholder="e.g. Upper Body Push, Leg Day, Cardio" />
+      </div>
+      <div class="form-group" style="margin-bottom:0;">
+        <label>Day Focus / Notes</label>
+        <input type="text" id="planner-day-notes" class="form-control" value="${currentPlan.notes || ''}" placeholder="e.g. Focus on progressive overload" />
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong style="font-size:0.9rem;">Scheduled Exercises (${exercises.length})</strong>
+      <button class="btn btn-sm btn-ghost" onclick="openExerciseModal()">+ Add Exercise</button>
+    </div>
+
+    <div id="planner-exercises-list">
+      ${exercisesListHtml}
+    </div>
+  `;
+}
+
+function togglePlannerRestDay(isRest) {
+  const currentPlan = (SC.fitness.plan || []).find(p => p.day === SC.fitness.activePlannerDay) || {
+    day: SC.fitness.activePlannerDay,
+    workoutName: '',
+    isRestDay: isRest,
+    notes: '',
+    exercises: []
+  };
+
+  currentPlan.isRestDay = isRest;
+  renderPlannerDayView(currentPlan);
+  renderPlannerTabs();
+}
+
+// ── Add/Edit Exercise Modal Handlers ──────────────────────────
+function openExerciseModal(editIndex = -1) {
+  document.getElementById('exercise-edit-index').value = editIndex;
+
+  const titleEl = document.getElementById('exercise-modal-title');
+  const nameInput = document.getElementById('ex-name');
+  const setsInput = document.getElementById('ex-sets');
+  const repsInput = document.getElementById('ex-reps');
+  const weightInput = document.getElementById('ex-weight');
+  const restInput = document.getElementById('ex-rest');
+  const notesInput = document.getElementById('ex-notes');
+
+  if (editIndex >= 0) {
+    const ex = SC.fitness.activeDayExercises[editIndex];
+    if (titleEl) titleEl.textContent = 'Edit Exercise';
+    if (nameInput) nameInput.value = ex.name || '';
+    if (setsInput) setsInput.value = ex.sets || 3;
+    if (repsInput) repsInput.value = ex.reps || '10';
+    if (weightInput) weightInput.value = ex.weight || '';
+    if (restInput) restInput.value = ex.restDuration || '';
+    if (notesInput) notesInput.value = ex.notes || '';
+  } else {
+    if (titleEl) titleEl.textContent = 'Add Exercise';
+    if (nameInput) nameInput.value = '';
+    if (setsInput) setsInput.value = 3;
+    if (repsInput) repsInput.value = '10';
+    if (weightInput) weightInput.value = '';
+    if (restInput) restInput.value = '60s';
+    if (notesInput) notesInput.value = '';
+  }
+
+  openModal('exercise-modal');
+}
+
+function saveExerciseToPlan() {
+  const name = document.getElementById('ex-name')?.value.trim();
+  if (!name) {
+    toast('Exercise name is required', 'warning');
+    return;
+  }
+
+  const sets = parseInt(document.getElementById('ex-sets')?.value, 10) || 3;
+  const reps = document.getElementById('ex-reps')?.value.trim() || '10';
+  const weight = document.getElementById('ex-weight')?.value.trim() || '';
+  const restDuration = document.getElementById('ex-rest')?.value.trim() || '';
+  const notes = document.getElementById('ex-notes')?.value.trim() || '';
+  const editIndex = parseInt(document.getElementById('exercise-edit-index')?.value, 10);
+
+  const exObj = {
+    name,
+    sets,
+    reps,
+    weight,
+    restDuration,
+    notes,
+    order: editIndex >= 0 ? editIndex : SC.fitness.activeDayExercises.length
+  };
+
+  if (editIndex >= 0) {
+    SC.fitness.activeDayExercises[editIndex] = exObj;
+  } else {
+    SC.fitness.activeDayExercises.push(exObj);
+  }
+
+  closeModal('exercise-modal');
+
+  const currentPlan = (SC.fitness.plan || []).find(p => p.day === SC.fitness.activePlannerDay) || {
+    day: SC.fitness.activePlannerDay,
+    workoutName: '',
+    isRestDay: false,
+    notes: '',
+    exercises: []
+  };
+  currentPlan.exercises = SC.fitness.activeDayExercises;
+  renderPlannerDayView(currentPlan);
+  renderPlannerTabs();
+  toast(editIndex >= 0 ? 'Exercise updated' : 'Exercise added', 'info');
+}
+
+function deleteExerciseFromPlan(index) {
+  SC.fitness.activeDayExercises.splice(index, 1);
+  const currentPlan = (SC.fitness.plan || []).find(p => p.day === SC.fitness.activePlannerDay) || {
+    day: SC.fitness.activePlannerDay,
+    exercises: []
+  };
+  currentPlan.exercises = SC.fitness.activeDayExercises;
+  renderPlannerDayView(currentPlan);
+  renderPlannerTabs();
+  toast('Exercise removed', 'info');
+}
+
+function reorderExercise(index, direction) {
+  const list = SC.fitness.activeDayExercises;
+  const targetIndex = index + direction;
+  if (targetIndex < 0 || targetIndex >= list.length) return;
+
+  const temp = list[index];
+  list[index] = list[targetIndex];
+  list[targetIndex] = temp;
+
+  list.forEach((ex, i) => { ex.order = i; });
+
+  const currentPlan = (SC.fitness.plan || []).find(p => p.day === SC.fitness.activePlannerDay) || {
+    day: SC.fitness.activePlannerDay,
+    exercises: []
+  };
+  currentPlan.exercises = list;
+  renderPlannerDayView(currentPlan);
+}
+
+// ── Save Current Day Plan to Backend ──────────────────────────
+async function saveCurrentDayPlan() {
+  const activeDay = SC.fitness.activePlannerDay;
+  const isRest = Boolean(document.getElementById('planner-rest-day-toggle')?.checked);
+  const workoutName = document.getElementById('planner-workout-name')?.value.trim() || (isRest ? 'Rest Day' : 'Workout');
+  const notes = document.getElementById('planner-day-notes')?.value.trim() || '';
+
+  try {
+    const payload = {
+      workoutName,
+      isRestDay: isRest,
+      notes,
+      exercises: isRest ? [] : (SC.fitness.activeDayExercises || [])
+    };
+
+    await api('PUT', `/api/fitness/plan/${activeDay}`, payload);
+    toast(`Saved ${activeDay} routine successfully!`, 'success');
+
+    // Reload planner to reflect clean backend state
+    await loadFitnessPlanner(activeDay);
+  } catch (err) {
+    console.error('Save day plan error:', err);
+    toast('Failed to save workout plan.', 'error');
+  }
+}
+
+
 
 // ─── Bootstrap ────────────────────────────────────────────────
 (function init() {

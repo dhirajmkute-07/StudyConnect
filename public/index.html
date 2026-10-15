@@ -154,6 +154,24 @@
     </div>
 
     <div class="sidebar-section">
+      <div class="sidebar-section-label">Fitness & Health</div>
+      <nav>
+        <a class="nav-item" data-page="fitness" onclick="navigate('fitness')">
+          <div class="nav-item-inner">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4v16M18 4v16M2 8h4M18 8h4M2 16h4M18 16h4M6 12h12"/></svg></span>
+            <span class="nav-label">Fitness</span>
+          </div>
+        </a>
+        <a class="nav-item" data-page="fitness-planner" onclick="navigate('fitness-planner')">
+          <div class="nav-item-inner">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg></span>
+            <span class="nav-label">Workout Planner</span>
+          </div>
+        </a>
+      </nav>
+    </div>
+
+    <div class="sidebar-section">
       <div class="sidebar-section-label">Tools</div>
       <nav>
         <a class="nav-item" data-page="timer" onclick="navigate('timer')">
@@ -555,6 +573,138 @@
         </div>
       </div>
 
+      <!-- ===== FITNESS DASHBOARD ===== -->
+      <div class="page" id="page-fitness">
+        <div class="welcome-banner fitness-banner">
+          <div style="flex:1;min-width:240px;">
+            <div class="eyebrow" style="color:var(--accent-light);font-size:0.75rem;font-weight:700;letter-spacing:0.08em;margin-bottom:4px;">FITNESS & WELLNESS COMMAND CENTER</div>
+            <h2 id="fitness-welcome-title">Your Fitness Dashboard 💪</h2>
+            <p id="fitness-welcome-sub">Crush your fitness goals with disciplined workouts, real streaks, and data-backed consistency.</p>
+          </div>
+          <div class="fitness-banner-actions">
+            <div class="date-select-chip">
+              <label for="fitness-active-date" class="text-xs" style="color:var(--text-inverse);opacity:0.9;margin-right:6px;font-weight:600;">Date:</label>
+              <input type="date" id="fitness-active-date" class="fitness-date-input" onchange="onFitnessDateChange(this.value)" />
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="navigate('fitness-planner')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Weekly Planner
+            </button>
+          </div>
+        </div>
+
+        <!-- Metric Summary Cards (Req 7) -->
+        <div class="fitness-stats-grid" id="fitness-stats-grid"></div>
+
+        <!-- 7-day strip (Image 1 reference) -->
+        <div class="card mb-4">
+          <div class="card-header" style="padding-bottom:12px;">
+            <div>
+              <div class="card-title">This Week's Routine</div>
+              <div class="card-subtitle" id="fitness-week-subtitle">Monday – Sunday Schedule & Completion</div>
+            </div>
+            <div id="fitness-streak-badge" class="badge-streak">🔥 0-Day Streak</div>
+          </div>
+          <div class="week-strip-container" id="fitness-week-strip"></div>
+        </div>
+
+        <!-- 2-Column Dashboard Grid -->
+        <div class="dashboard-grid">
+          <!-- Left Column: Today's Scheduled Workout & Active Tracker (Req 3) -->
+          <div>
+            <div class="card mb-4" id="today-workout-container"></div>
+
+            <!-- Activity Duration Graph (Req 6) -->
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">Workout Activity & Duration</div>
+                  <div class="card-subtitle">Minutes logged per day (Past 14 Days)</div>
+                </div>
+              </div>
+              <div id="fitness-duration-chart" class="chart-container"></div>
+            </div>
+          </div>
+
+          <!-- Right Column: GitHub-Style Calendar & History (Req 4, 6) -->
+          <div>
+            <!-- GitHub-Style Activity Calendar (Req 6) -->
+            <div class="card mb-4">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">Consistency Calendar</div>
+                  <div class="card-subtitle">Activity heatmap & streak continuity</div>
+                </div>
+                <div class="calendar-legend">
+                  <span class="legend-item"><span class="legend-dot dot-completed"></span> Done</span>
+                  <span class="legend-item"><span class="legend-dot dot-rest"></span> Rest</span>
+                  <span class="legend-item"><span class="legend-dot dot-missed"></span> Missed</span>
+                </div>
+              </div>
+              <div id="fitness-calendar-grid" class="fitness-calendar-heatmap"></div>
+              <div class="calendar-footer-note">
+                <small class="text-muted">💡 Rest days bridge your streak without breaking momentum. Missed workouts break your streak.</small>
+              </div>
+            </div>
+
+            <!-- Workout Session History (Req 4) -->
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">Workout History</div>
+                  <div class="card-subtitle">Recent sessions & detailed logs</div>
+                </div>
+              </div>
+              <div id="fitness-history-list" class="fitness-history-container"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== WEEKLY WORKOUT PLANNER ===== -->
+      <div class="page" id="page-fitness-planner">
+        <div class="page-header">
+          <div>
+            <h1>Weekly Workout Planner</h1>
+            <p>Customize your training schedule for Monday through Sunday. Changing your future plan never modifies past logs.</p>
+          </div>
+          <div class="planner-header-actions">
+            <button class="btn btn-secondary" onclick="navigate('fitness')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+              Fitness Dashboard
+            </button>
+            <button class="btn btn-primary" onclick="saveCurrentDayPlan()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              Save Day Plan
+            </button>
+          </div>
+        </div>
+
+        <!-- Weekday Tabs -->
+        <div class="day-tabs" id="fitness-planner-day-tabs"></div>
+
+        <div class="card">
+          <div class="card-header" style="flex-wrap:wrap;gap:14px;">
+            <div style="flex:1;min-width:200px;">
+              <div class="card-title" id="planner-active-day-title">Monday Routine</div>
+              <div class="card-subtitle">Configure workout name, exercises, sets, reps and rest periods</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <label class="switch-wrap" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:0.875rem;">
+                <input type="checkbox" id="planner-rest-day-toggle" onchange="togglePlannerRestDay(this.checked)" />
+                <span class="switch-slider"></span>
+                <span>Rest Day</span>
+              </label>
+              <button class="btn btn-sm btn-primary" id="btn-add-exercise" onclick="openExerciseModal()">
+                + Add Exercise
+              </button>
+            </div>
+          </div>
+
+          <div id="planner-active-day-body" style="padding:20px;"></div>
+        </div>
+      </div>
+
     </main><!-- /page-content -->
   </div><!-- /main-layout -->
 </div><!-- /app -->
@@ -692,6 +842,95 @@
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('test-modal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveTest()">Save Test</button>
+    </div>
+  </div>
+</div>
+
+<!-- Exercise Modal -->
+<div class="modal-overlay" id="exercise-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="exercise-modal-title">Add Exercise</h3>
+      <button class="modal-close" onclick="closeModal('exercise-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="exercise-edit-index" />
+      <div class="form-group">
+        <label>Exercise Name *</label>
+        <input type="text" id="ex-name" class="form-control" placeholder="e.g. Barbell Bench Press, Squats, Pull-ups" />
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group">
+          <label>Sets *</label>
+          <input type="number" id="ex-sets" class="form-control" min="1" max="20" value="3" />
+        </div>
+        <div class="form-group">
+          <label>Reps or Duration *</label>
+          <input type="text" id="ex-reps" class="form-control" placeholder="e.g. 8-12, 15 reps, 45s, 20 min" value="10" />
+        </div>
+      </div>
+      <div class="form-row-2col">
+        <div class="form-group">
+          <label>Target Weight (Optional)</label>
+          <input type="text" id="ex-weight" class="form-control" placeholder="e.g. 50 kg, 25 lbs, Bodyweight" />
+        </div>
+        <div class="form-group">
+          <label>Rest Duration (Optional)</label>
+          <input type="text" id="ex-rest" class="form-control" placeholder="e.g. 60s, 90s, 2 min" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Exercise Notes / Form Cues (Optional)</label>
+        <textarea id="ex-notes" class="form-control" rows="2" placeholder="e.g. Slow eccentric, pause at bottom, drop set on last set"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('exercise-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveExerciseToPlan()">Save Exercise</button>
+    </div>
+  </div>
+</div>
+
+<!-- Complete Workout Confirmation Modal -->
+<div class="modal-overlay" id="workout-complete-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Complete Today's Workout 🎉</h3>
+      <button class="modal-close" onclick="closeModal('workout-complete-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--text-secondary);margin-bottom:16px;">Awesome effort! Confirm your total workout duration and any notes before logging completion.</p>
+      <div class="form-group">
+        <label>Total Duration (Minutes) *</label>
+        <input type="number" id="complete-duration" class="form-control" min="1" max="360" placeholder="e.g. 45" />
+      </div>
+      <div class="form-group">
+        <label>Workout Notes (Optional)</label>
+        <textarea id="complete-notes" class="form-control" rows="3" placeholder="How was the session? Energy levels, personal records, pump…"></textarea>
+      </div>
+      <div style="padding:10px 14px;background:var(--accent-subtle);border-radius:var(--radius-sm);border:1px solid var(--accent-light);color:var(--accent-dark);font-size:0.85rem;font-weight:500;">
+        ✓ Completing your scheduled workout advances your daily streak!
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('workout-complete-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmCompleteWorkout()">Confirm & Complete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Workout Session Details / Edit Modal -->
+<div class="modal-overlay" id="session-details-modal">
+  <div class="modal" style="max-width:680px;">
+    <div class="modal-header">
+      <h3 id="session-modal-title">Workout Session Details</h3>
+      <button class="modal-close" onclick="closeModal('session-details-modal')">✕</button>
+    </div>
+    <div class="modal-body" id="session-modal-body" style="max-height:70vh;overflow-y:auto;"></div>
+    <div class="modal-footer" id="session-modal-footer">
+      <button class="btn btn-danger" id="session-modal-delete-btn">Delete Session</button>
+      <button class="btn btn-secondary" onclick="closeModal('session-details-modal')">Close</button>
+      <button class="btn btn-primary" id="session-modal-save-btn">Save Changes</button>
     </div>
   </div>
 </div>
