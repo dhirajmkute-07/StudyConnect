@@ -1,0 +1,8 @@
+{
+  "name": "StudyConnect",
+  "description": "Academic command center for students with study plans, timetable, attendance tracking, fitness, and timers",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
